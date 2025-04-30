@@ -33,11 +33,11 @@ No installation needed — simply click the hosted link to launch the app.
 1. Clone this repo
 2. Install dependencies:
    
-<pre> ```bash pip install -r requirements.txt ``` </pre>
+<pre> pip install -r requirements.txt</pre>
 
 3. Run
 
-<pre> ```bash streamlit run app.py ``` </pre>
+<pre>bash streamlit run app.py</pre>
 
 ## Target Audience
 This app is perfect for:
