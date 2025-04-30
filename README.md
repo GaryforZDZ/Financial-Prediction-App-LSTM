@@ -56,7 +56,7 @@ This app is perfect for:
 ④ Integration with other real-time APIs for more data sources
 
 ## Contact
-For questions or collaboration requests, please contact [us] at [eveme@bu.edu] / [yy3216@bu.edu] / [dizhaozh@bu.edu].
+For questions or collaboration requests, please contact us at [eveme@bu.edu] / [yy3216@bu.edu] / [dizhaozh@bu.edu].
 
 ## Contributors: 
 Dizhao Zhang, Yixi Yu, Shuomeng Guan
