@@ -1,5 +1,5 @@
 # Stock Volatility & Trading Volume Predictor
-A Streamlit-based web application that provides next-day predictions of both stock price volatility and trading volume using an advanced LSTM deep learning model. Designed for investors, traders, and market analysts, the app integrates technical, macroeconomic, and sentiment-based signals to deliver data-driven insights.
+A Streamlit-based web application that provides current day's predictions of trading volume and future 5-day volatility using an advanced LSTM deep learning model. Designed for investors, traders, and market analysts, the app integrates technical, macroeconomic, and sentiment-based signals to deliver data-driven insights.
 ## About the Project
 Modern financial markets are influenced by a multitude of factors—ranging from corporate fundamentals to breaking news headlines. Our app simplifies this complexity by offering:
 - Predicted Next-Day Volatility
