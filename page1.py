@@ -7,6 +7,9 @@ import yfinance as yf
 import time
 import pickle
 import numpy as np
+import matplotlib.pyplot as plt
+from model import LSTMVolumePredictor
+
 
 # ---- Opening Animation ----
 if 'gif_displayed' not in st.session_state:
@@ -21,12 +24,19 @@ if not st.session_state['gif_displayed']:
 # ---- Main Page Config ----
 st.set_page_config(page_title="Stock Volatility & Volume Predictor", layout="wide")
 
+
 # --- Main Page Title ---
 st.title("📈 Stock Volatility & Trading Volume Predictor")
 st.caption("Predict future volatility and trading activity of stocks based on deep learning (LSTM) modeling.")
 st.markdown("---")
 
+
 FMP_API_KEY = st.secrets["FMP_API_KEY"]
+
+@st.cache_data
+def load_macro_data():
+    return pd.read_csv("realtime_marco.csv")
+macro_df = load_macro_data()
 
 # 拉取公司基本信息
 def get_company_info(symbol: str) -> dict:
@@ -82,6 +92,22 @@ def find_related_tickers(current_symbol: str, sector: str) -> list:
         st.error(f"Error finding related tickers: {e}")
         return []
 
+import yfinance as yf
+import streamlit as st
+import matplotlib.pyplot as plt
+
+def plot_mini_sparkline(data, color):
+    fig, ax = plt.subplots(figsize=(2.5, 1.2))
+    ax.plot(data, linewidth=2, color=color)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    ax.set_facecolor('none')
+    fig.patch.set_facecolor('none')
+    plt.tight_layout(pad=0)
+    return fig
+
 
 def display_related_stocks(main_ticker):
     related_symbols = ticker_to_related.get(main_ticker.upper(), ticker_to_related["DEFAULT"])
@@ -90,10 +116,9 @@ def display_related_stocks(main_ticker):
     for sym in related_symbols:
         try:
             stock = yf.Ticker(sym)
-            hist = stock.history(period="2d")
+            hist = stock.history(period="7d", interval="1h")  # 更高频率，更像 Google 样式
 
             if hist is None or hist.empty or len(hist) < 2:
-                # 如果没有足够的数据，就跳过这个股票
                 continue
 
             price_today = hist['Close'].iloc[-1]
@@ -104,20 +129,19 @@ def display_related_stocks(main_ticker):
                 "symbol": sym,
                 "name": stock.info.get('shortName', sym),
                 "price": price_today,
-                "change_pct": change_pct
+                "change_pct": change_pct,
+                "price_trend": hist["Close"].values  # 提取 numpy 数组用于绘图
             })
         except Exception as e:
             st.error(f"Error fetching data for {sym}: {e}")
 
+    st.header("🔎 People Also Search")
 
-    st.header(" 🔎 People Also Search")
-
-    # 使用 st.columns 创建列
     cols = st.columns(len(related_stocks))
 
     for idx, stock in enumerate(related_stocks):
         with cols[idx]:
-            # 使用一致的 HTML 结构和样式，确保内容垂直对齐
+            # 文本部分
             st.markdown(f"""
                 <div style='text-align: center; line-height: 1.5;'>
                     <div style='font-size: 20px; font-weight: bold;'>
@@ -132,6 +156,84 @@ def display_related_stocks(main_ticker):
                     </div>
                 </div>
             """, unsafe_allow_html=True)
+
+            # 小图表部分
+            line_color = "green" if stock["change_pct"] >= 0 else "red"
+            fig = plot_mini_sparkline(stock["price_trend"], line_color)
+
+            st.pyplot(fig)
+
+
+
+def get_company_metrics(ticker):
+    url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={FMP_API_KEY}"
+    response = requests.get(url)
+    data = response.json()
+    if not data:
+        return {key: 0.0 for key in [
+            "divyield", "beta", "marketCap", "averageVolume", "price"
+        ]}
+    profile = data[0]
+    return {
+        "divyield": profile.get("lastDividend", 0.0),
+        "beta": profile.get("beta", 0.0),
+        "marketCap": profile.get("marketCap", 0.0),
+        "averageVolume": profile.get("averageVolume", 0.0),
+        "price": profile.get("price", 0.0)
+    }
+
+# --- 构建特征函数（volatility 专用） ---
+def get_features_for_prediction(ticker):
+    lookback_days = 30
+    df = yf.download(ticker, period="60d", interval="1d").dropna().tail(lookback_days)
+    df["PRC"] = df["Close"]
+    df["Momentum"] = df["Close"].pct_change(5).fillna(0)
+    df["Volatility_5d"] = df["Close"].pct_change().rolling(5).std().fillna(0)
+
+    macro_cols = [
+        "GDP", "CPI", "Unemployment Rate", "Federal Funds Rate",
+        "Personal Consumption Expenditures", "Industrial Production", "Retail Sales",
+        "M2 Money Stock", "VIX", "TED Spread", "sentiment_score"
+    ]
+    macro_row = macro_df.iloc[-1]
+    for col in macro_cols:
+        df[col] = macro_row[col]
+
+    firm_cols = [
+        "bm", "divyield", "capei", "gpm", "npm", "roa", "roe",
+        "capital_ratio", "de_ratio", "quick_ratio", "inv_turn"
+    ]
+    firm_data = get_company_metrics(ticker)
+    for col in firm_cols:
+        df[col] = firm_data[col]
+
+    feature_cols = [
+        "PRC", "Volatility_5d", "Momentum", "sentiment_score",
+        *macro_cols[:-1], *firm_cols  # sentiment_score 已加过
+    ]
+    return df[feature_cols].values
+
+# --- Volume 模型特征 ---
+def get_features_for_prediction_volume(ticker):
+    X = get_features_for_prediction(ticker)
+    vol_df = yf.download(ticker, period="60d", interval="1d").dropna().tail(30)
+    X[:, 1] = vol_df["Volume"].values  # 替换 Volatility_5d 为 VOL
+    return X
+
+# --- 模型预测逻辑 ---
+def predict_volatility(ticker):
+    with open("lstm_volatility_model.pkl", "rb") as f:
+        model = pickle.load(f)
+    X = get_features_for_prediction(ticker)
+    X = np.expand_dims(X, axis=0)
+    return round(float(model.predict(X)[0][0]), 4)
+
+def predict_volume(ticker):
+    with open("lstm_volume_model.pkl", "rb") as f:
+        model = pickle.load(f)
+    X = get_features_for_prediction_volume(ticker)
+    X = np.expand_dims(X, axis=0)
+    return int(model.predict(X)[0][0])
 
 
 # --- Ticker Selection ---
@@ -185,9 +287,11 @@ if predict_button:
         predicted_volatility = simulate_predicted_volatility(selected_ticker)
         predicted_volume = simulate_predicted_volume(selected_ticker)
 
-        # --- Display Results ---
-        st.write(f"📈 **Predicted Volatility:** {predicted_volatility}")
-        st.write(f"📊 **Predicted Volume:** {predicted_volume:,}")
+        # --- Predict based on selected ticker ---
+        predicted_volatility = simulate_predicted_volatility(selected_ticker)
+        predicted_volume = simulate_predicted_volume(selected_ticker)
+
+
 
     # 1. Only Now Display Company Info
     if info:
